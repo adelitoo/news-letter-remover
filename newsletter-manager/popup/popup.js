@@ -8,6 +8,9 @@ let scanButton, settingsButton;
 let newslettersSection, newslettersList;
 let selectAllButton, bulkUnsubscribeButton;
 
+// Scanning state
+let isScanning = false;
+
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('Popup DOM loaded');
@@ -89,23 +92,32 @@ function setStatus(type, message) {
     }
 }
 
+// Enhanced scan function with full account support
 async function handleScan() {
-    console.log('Scan button clicked');
+    if (isScanning) return;
     
-    setStatus('loading', 'Scanning for newsletters...');
-    scanButton.disabled = true;
+    isScanning = true;
+    setStatus('loading', 'Starting full account scan...');
     scanButton.textContent = 'Scanning...';
+    scanButton.disabled = true;
+    
+    // Add progress display
+    const progressDiv = document.createElement('div');
+    progressDiv.id = 'scanProgress';
+    progressDiv.innerHTML = `
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="progress-text">Initializing scan...</div>
+    `;
+    document.querySelector('.actions-section').appendChild(progressDiv);
     
     try {
-        // Get current active tab
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         
-        // Send message to content script to scan for newsletters
         const response = await chrome.tabs.sendMessage(tab.id, {
-            action: 'scanNewsletters'
+            action: 'scanAllNewsletters'  // Changed to use full scan
         });
-        
-        console.log('Scan response:', response);
         
         if (response && response.success) {
             // Update stats
@@ -126,8 +138,28 @@ async function handleScan() {
         console.error('Scan error:', error);
         setStatus('error', 'Scan failed - please refresh Gmail');
     } finally {
+        isScanning = false;
         scanButton.disabled = false;
         scanButton.textContent = 'Scan for Newsletters';
+        document.getElementById('scanProgress')?.remove();
+    }
+}
+
+// Listen for progress updates
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'updateScanProgress') {
+        updateScanProgress(request.data);
+    }
+});
+
+function updateScanProgress(data) {
+    const progressFill = document.querySelector('.progress-fill');
+    const progressText = document.querySelector('.progress-text');
+    
+    if (progressFill && progressText) {
+        const percentage = (data.processed / data.total) * 100;
+        progressFill.style.width = `${percentage}%`;
+        progressText.textContent = data.status;
     }
 }
 
@@ -154,11 +186,16 @@ function createNewsletterItem(newsletter, index) {
     const item = document.createElement('div');
     item.className = 'newsletter-item';
     
+    // Add confidence and method indicators
+    const confidenceText = newsletter.confidence ? 
+        `${Math.round(newsletter.confidence * 100)}% (${newsletter.method})` : '';
+    
     item.innerHTML = `
         <input type="checkbox" class="newsletter-checkbox" data-index="${index}">
         <div class="newsletter-info">
             <div class="newsletter-sender">${newsletter.sender}</div>
             <div class="newsletter-subject">${newsletter.subject}</div>
+            ${confidenceText ? `<div class="newsletter-confidence">${confidenceText}</div>` : ''}
         </div>
         <div class="newsletter-count">${newsletter.count || 1}</div>
     `;

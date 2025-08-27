@@ -79,3 +79,50 @@ function handleUnsubscribe(data, sendResponse) {
 chrome.runtime.onConnect.addListener((port) => {
   console.log('Port connected:', port.name);
 });
+
+// Add this to your existing background/background.js file
+
+// Handle messages from content script and popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Background received message:', request);
+  
+  switch (request.action) {
+    case 'getStats':
+      // Get current stats from storage
+      chrome.storage.local.get(['stats'], (result) => {
+        sendResponse(result.stats || {});
+      });
+      return true;
+      
+    case 'updateStats':
+      // Update stats in storage
+      chrome.storage.local.get(['stats'], (result) => {
+        const currentStats = result.stats || {};
+        const newStats = { ...currentStats, ...request.data };
+        
+        chrome.storage.local.set({ 'stats': newStats }, () => {
+          sendResponse({ success: true });
+        });
+      });
+      return true;
+      
+    case 'updateScanProgress':
+      // Relay progress updates from content script to popup
+      chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+        if (tabs[0]) {
+          chrome.runtime.sendMessage(request);
+        }
+      });
+      break;
+      
+    case 'performUnsubscribe':
+      // Handle unsubscribe requests
+      handleUnsubscribe(request.data, sendResponse);
+      return true;
+      
+    default:
+      console.log('Unknown action:', request.action);
+      sendResponse({ error: 'Unknown action' });
+  }
+});
+
